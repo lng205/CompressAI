@@ -1,12 +1,10 @@
 # CompressAI
 
-[link](https://github.com/InterDigitalInc/CompressAI)
-
-该项目提供了一个基于pytorch的数据压缩库
+[CompressAI](https://github.com/InterDigitalInc/CompressAI)提供了一个基于pytorch的数据压缩库
 
 ## 使用过程
 
-- 参考官方文档安装配置（pip会安装所有相关依赖，包括pytorch）
+- 参考官方文档安装配置
 
 - 下载数据集，将图片分至train和test文件夹。
 

@@ -14,7 +14,7 @@
 
 - 配置代理，安装VSCode，安装git，安装[pip](https://pip.pypa.io/en/stable/installation/)
 
-- 安装[compressAI](https://interdigitalinc.github.io/CompressAI/installation.html)
+- 安装[compressAI](https://interdigitalinc.github.io/CompressAI/installation.html)（pip会安装所有相关依赖，包括pytorch）
 
 - 下载数据集（Kodak），将图片分至train和test(20~24)文件夹。
 
