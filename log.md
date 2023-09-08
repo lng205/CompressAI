@@ -85,3 +85,11 @@
     1. [bpp](https://www.quora.com/What-is-the-meaning-of-bpp-0-025-of-an-image)(bit per pixel)-压缩后单个像素的体积
     2. [psnr](https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio)(peak signal to noise ratio)-以解压缩的图像与原图的差值作为噪声，再假设每个像素均为最大值作为信号，计算信噪比
     3. [ms-ssim]结构相似度，考虑了人的感知来衡量失真，通常对明度轴进行计算。
+
+# 9/5
+
+- 学习custom model小节，试图理解train.py
+
+# 9/8
+
+- 整理内容
