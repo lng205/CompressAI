@@ -50,7 +50,9 @@ Using trained model checkpoint_best_loss-7c8032a4-ans
 
 ### 自定义模型
 
-1. 网络结构：Pytorch.nn.Module类可用于描述网络结构，compressai在此基础上提供了一个便于优化的模型类CompressionModel:
+#### 网络结构
+
+- Pytorch.nn.Module类可用于描述网络结构，compressai在此基础上提供了一个便于优化的模型类CompressionModel:
    
 ```python
 from compressai.models import CompressionModel
@@ -83,7 +85,7 @@ def forward(self, x):
 ```
 
 
-访问模型参数：
+- 访问模型参数：
 
 ```python
 import torch.optim as optim
@@ -94,9 +96,9 @@ optimizer = optim.Adam(parameters, lr=1e-4)
 aux_optimizer = optim.Adam(aux_parameters, lr=1e-3)
 ```
 
-1. 
+#### 损失函数
 
-- 损失函数：我们至少需要从压缩率和失真度两个方面衡量一个有损压缩模型的性能（率失真理论），我们可用bpp和mse加权求和作为损失函数：
+- 我们至少需要从压缩率和失真度两个方面衡量一个有损压缩模型的性能（率失真理论），我们可用bpp和mse加权求和作为损失函数：
 
 ```python
 import math
@@ -122,7 +124,8 @@ loss = mse_loss + lmbda * bpp_loss
 
 - 由于我们选择的模型结构中间有[信息瓶颈层](https://en.wikipedia.org/wiki/Information_bottleneck_method#:~:text=The%20information%20bottleneck%20can%20also,its%20direct%20prediction%20from%20X.)（？不太理解，需要进一步学习），还需要优化辅助损失函数：`aux_loss = net.entropy_bottleneck.loss()`
 
-3. 训练
+#### 训练
+
 ```python
 x = torch.rand(1, 3, 64, 64)
 for i in range(10):
