@@ -9,14 +9,21 @@ from torchvision import transforms
 from compressai.datasets import ImageFolder
 
 
-def get_logger(name=__name__, file_name="log.txt", file_level=logging.DEBUG, stream_level=logging.INFO) -> logging.Logger:
+def get_logger(
+    name=__name__,
+    file_name="log.txt",
+    file_level=logging.DEBUG,
+    stream_level=logging.INFO,
+):
     logger = logging.getLogger(name)
     if logger.hasHandlers():
         return logger
 
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
 
     file_handler = logging.FileHandler(file_name, encoding="utf-8")
     file_handler.setLevel(file_level)
@@ -159,6 +166,7 @@ class CustomDataParallel(nn.DataParallel):
             return super().__getattr__(key)
         except AttributeError:
             return getattr(self.module, key)
+
 
 def configure_optimizers(net, args):
     """Separate parameters for the main optimizer and the auxiliary optimizer.
