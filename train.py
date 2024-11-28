@@ -8,11 +8,17 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import torch.optim as optim
 
-from compressai.losses import RateDistortionLoss
-from compressai.zoo import image_models
+from loss import RateDistortionLoss
+from model import Net1
 
-from utils import get_logger, parse_args, prepare_data, \
-    CustomDataParallel, configure_optimizers, AverageMeter
+from utils import (
+    get_logger,
+    parse_args,
+    prepare_data,
+    CustomDataParallel,
+    configure_optimizers,
+    AverageMeter,
+)
 
 
 logger = get_logger()
@@ -28,7 +34,7 @@ def main(argv):
 
     train_dataloader, test_dataloader = prepare_data(args, device)
 
-    net = image_models[args.model](quality=5)
+    net = Net1()
     net = net.to(device)
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -66,7 +72,6 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
-            file_name = f"{args.model}_checkpoint.pth.tar"
             torch.save(
                 {
                     "epoch": epoch,
@@ -76,13 +81,10 @@ def main(argv):
                     "aux_optimizer": aux_optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
-                file_name,
+                "checkpoint.pth.tar",
             )
             if is_best:
-                shutil.copyfile(
-                    file_name, 
-                    f"{args.model}_checkpoint_best_loss.pth.tar"
-                )
+                shutil.copyfile("checkpoint.pth.tar", "checkpoint_best_loss.pth.tar")
 
 
 def train_one_epoch(

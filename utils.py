@@ -2,12 +2,11 @@ import logging
 import argparse
 
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from compressai.optimizers import net_aux_optimizer
 from compressai.datasets import ImageFolder
-from compressai.zoo import image_models
 
 
 def get_logger(name=__name__, file_name="log.txt", file_level=logging.DEBUG, stream_level=logging.INFO) -> logging.Logger:
@@ -34,13 +33,6 @@ def get_logger(name=__name__, file_name="log.txt", file_level=logging.DEBUG, str
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
-    parser.add_argument(
-        "-m",
-        "--model",
-        default="bmshj2018-factorized",
-        choices=image_models.keys(),
-        help="Model architecture (default: %(default)s)",
-    )
     parser.add_argument(
         "-d", "--dataset", type=str, required=True, help="Training dataset"
     )
@@ -168,13 +160,27 @@ class CustomDataParallel(nn.DataParallel):
         except AttributeError:
             return getattr(self.module, key)
 
-
 def configure_optimizers(net, args):
     """Separate parameters for the main optimizer and the auxiliary optimizer.
     Return two optimizers"""
-    conf = {
-        "net": {"type": "Adam", "lr": args.learning_rate},
-        "aux": {"type": "Adam", "lr": args.aux_learning_rate},
-    }
-    optimizer = net_aux_optimizer(net, conf)
-    return optimizer["net"], optimizer["aux"]
+
+    parameters = (
+        p
+        for n, p in net.named_parameters()
+        if not n.endswith(".quantiles") and p.requires_grad
+    )
+    aux_parameters = (
+        p
+        for n, p in net.named_parameters()
+        if n.endswith(".quantiles") and p.requires_grad
+    )
+
+    optimizer = optim.Adam(
+        parameters,
+        lr=args.learning_rate,
+    )
+    aux_optimizer = optim.Adam(
+        aux_parameters,
+        lr=args.aux_learning_rate,
+    )
+    return optimizer, aux_optimizer
