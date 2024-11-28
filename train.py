@@ -1,0 +1,234 @@
+import sys
+import random
+import shutil
+
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+from torch.utils.data import DataLoader
+from torchvision import transforms
+
+from compressai.datasets import ImageFolder
+from compressai.losses import RateDistortionLoss
+from compressai.optimizers import net_aux_optimizer
+from compressai.zoo import image_models
+
+from args import parse_args
+from logger import get_logger
+
+
+logger = get_logger()
+logger.info("Starting a New Training...")
+
+
+def main(argv):
+    args = parse_args(argv)
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+
+    device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+
+    train_dataloader, test_dataloader = prepare_data(args, device)
+
+    net = image_models[args.model](quality=5)
+    net = net.to(device)
+    if args.cuda and torch.cuda.device_count() > 1:
+        net = CustomDataParallel(net)
+
+    optimizer, aux_optimizer = configure_optimizers(net, args)
+    lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+    criterion = RateDistortionLoss(lmbda=args.lmbda)
+
+    last_epoch = 0
+    if args.checkpoint:
+        logger.info(f"loading {args.checkpoint}")
+        checkpoint = torch.load(args.checkpoint, map_location=device)
+        last_epoch = checkpoint["epoch"] + 1
+        net.load_state_dict(checkpoint["state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        aux_optimizer.load_state_dict(checkpoint["aux_optimizer"])
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+
+    best_loss = float("inf")
+    for epoch in range(last_epoch, args.epochs):
+        logger.info(f"Learning rate: {optimizer.param_groups[0]['lr']}")
+        train_one_epoch(
+            net,
+            criterion,
+            train_dataloader,
+            optimizer,
+            aux_optimizer,
+            epoch,
+            args.clip_max_norm,
+        )
+        loss = test_epoch(epoch, test_dataloader, net, criterion)
+        lr_scheduler.step(loss)
+
+        is_best = loss < best_loss
+        best_loss = min(loss, best_loss)
+
+        if args.save:
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "state_dict": net.state_dict(),
+                    "loss": loss,
+                    "optimizer": optimizer.state_dict(),
+                    "aux_optimizer": aux_optimizer.state_dict(),
+                    "lr_scheduler": lr_scheduler.state_dict(),
+                },
+                "checkpoint.pth.tar",
+            )
+            if is_best:
+                shutil.copyfile("checkpoint.pth.tar", "checkpoint_best_loss.pth.tar")
+
+
+def prepare_data(args, device):
+    # Transforms applied to the image data
+    train_transforms = transforms.Compose(
+        [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
+    )
+
+    test_transforms = transforms.Compose(
+        [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
+    )
+
+    train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
+    test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+        # pin the data to the memory so the os will not move them to swap space(disk)
+        # this allows GPU to perform DMA
+        pin_memory=(device == "cuda"),
+    )
+
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=args.test_batch_size,
+        num_workers=args.num_workers,
+        shuffle=False,
+        pin_memory=(device == "cuda"),
+    )
+    return train_dataloader, test_dataloader
+
+
+class CustomDataParallel(nn.DataParallel):
+    """Custom DataParallel to access the module methods."""
+
+    def __getattr__(self, key):
+        try:
+            return super().__getattr__(key)
+        except AttributeError:
+            return getattr(self.module, key)
+
+
+def configure_optimizers(net, args):
+    """Separate parameters for the main optimizer and the auxiliary optimizer.
+    Return two optimizers"""
+    conf = {
+        "net": {"type": "Adam", "lr": args.learning_rate},
+        "aux": {"type": "Adam", "lr": args.aux_learning_rate},
+    }
+    optimizer = net_aux_optimizer(net, conf)
+    return optimizer["net"], optimizer["aux"]
+
+
+def train_one_epoch(
+    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm
+):
+    model.train()
+    device = next(model.parameters()).device
+
+    log_points = iter([0, 25, 50, 75, 100])
+    log_point = next(log_points)
+    for i, d in enumerate(train_dataloader):
+        d = d.to(device)
+
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
+        out_net = model(d)
+
+        out_criterion = criterion(out_net, d)
+        out_criterion["loss"].backward()
+        if clip_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+        optimizer.step()
+
+        aux_loss = model.aux_loss()
+        aux_loss.backward()
+        aux_optimizer.step()
+
+        percentage = 100. * i / len(train_dataloader)
+        if percentage >= log_point:
+            logger.info(
+                f"Train epoch {epoch}: ["
+                f"{i*len(d)}/{len(train_dataloader.dataset)}"
+                f"({percentage:.0f}%)]"
+                f"\tLoss: {out_criterion['loss'].item():.3f} |"
+                f"\tMSE loss: {out_criterion['mse_loss'].item():.3f} |"
+                f"\tBpp loss: {out_criterion['bpp_loss'].item():.2f} |"
+                f"\tAux loss: {aux_loss.item():.2f}"
+            )
+            log_point = next(log_points)
+
+
+def test_epoch(epoch, test_dataloader, model, criterion):
+    model.eval()
+    device = next(model.parameters()).device
+
+    loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    mse_loss = AverageMeter()
+    aux_loss = AverageMeter()
+
+    with torch.no_grad():
+        for d in test_dataloader:
+            d = d.to(device)
+            out_net = model(d)
+            out_criterion = criterion(out_net, d)
+
+            aux_loss.update(model.aux_loss())
+            bpp_loss.update(out_criterion["bpp_loss"])
+            loss.update(out_criterion["loss"])
+            mse_loss.update(out_criterion["mse_loss"])
+
+    logger.info(
+        f"\Test epoch {epoch}: Average losses:"
+        f"\tLoss: {loss.avg:.3f} |"
+        f"\tMSE loss: {mse_loss.avg:.3f} |"
+        f"\tBpp loss: {bpp_loss.avg:.2f} |"
+        f"\tAux loss: {aux_loss.avg:.2f}\n"
+    )
+
+    return loss.avg
+
+
+class AverageMeter:
+    """Compute running average."""
+
+    def __init__(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

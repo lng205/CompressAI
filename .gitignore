@@ -1,0 +1,4 @@
+code.old/
+__pycache__/
+*.tar
+log.txt
