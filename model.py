@@ -1,12 +1,11 @@
+import torch
 import torch.nn as nn
-
 from compressai.entropy_models import EntropyBottleneck
-
 from compressai.layers import GDN
 from compressai.models.utils import conv, deconv
 
 class Net1(nn.Module):
-    def __init__(self, N=128):
+    def __init__(self, N=128, loss=0.2):
         super().__init__()
         self.entropy_bottleneck = EntropyBottleneck(N)
         self.encode = nn.Sequential(
@@ -24,11 +23,13 @@ class Net1(nn.Module):
             GDN(N, inverse=True),
             deconv(N, 3),
         )
+        self.loss = loss
 
     def forward(self, x):
         y = self.encode(x)
         y_hat, y_likelihoods = self.entropy_bottleneck(y)
-        x_hat = self.decode(y_hat)
+        y_rcv = self.transmission(y_hat, self.loss)
+        x_hat = self.decode(y_rcv)
 
         return {
             "x_hat": x_hat,
@@ -47,3 +48,8 @@ class Net1(nn.Module):
         net = cls(N)
         net.load_state_dict(state_dict)
         return net
+
+    def transmission(self, y, loss_ratio):
+        """Randomly set some values to 0 in y."""
+        rnd_y = torch.rand_like(y, device=y.device)
+        return y * (rnd_y > loss_ratio)
