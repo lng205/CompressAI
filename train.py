@@ -3,31 +3,23 @@ import random
 import shutil
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
-import torch.nn as nn
 import torch.optim as optim
 
-from torch.utils.data import DataLoader
-from torchvision import transforms
-
-from compressai.datasets import ImageFolder
 from compressai.losses import RateDistortionLoss
-from compressai.optimizers import net_aux_optimizer
 from compressai.zoo import image_models
 
-from args import parse_args
-from logger import get_logger
+from utils import get_logger, parse_args, prepare_data, \
+    CustomDataParallel, configure_optimizers, AverageMeter
 
 
 logger = get_logger()
-logger.info("Starting a New Training...")
 
 
 def main(argv):
     args = parse_args(argv)
-
     if args.seed is not None:
         torch.manual_seed(args.seed)
         random.seed(args.seed)
@@ -74,6 +66,7 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
+            file_name = f"{args.model}_checkpoint.pth.tar"
             torch.save(
                 {
                     "epoch": epoch,
@@ -83,64 +76,13 @@ def main(argv):
                     "aux_optimizer": aux_optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
-                "checkpoint.pth.tar",
+                file_name,
             )
             if is_best:
-                shutil.copyfile("checkpoint.pth.tar", "checkpoint_best_loss.pth.tar")
-
-
-def prepare_data(args, device):
-    # Transforms applied to the image data
-    train_transforms = transforms.Compose(
-        [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
-    )
-
-    test_transforms = transforms.Compose(
-        [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
-    )
-
-    train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
-    test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        shuffle=True,
-        # pin the data to the memory so the os will not move them to swap space(disk)
-        # this allows GPU to perform DMA
-        pin_memory=(device == "cuda"),
-    )
-
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=args.test_batch_size,
-        num_workers=args.num_workers,
-        shuffle=False,
-        pin_memory=(device == "cuda"),
-    )
-    return train_dataloader, test_dataloader
-
-
-class CustomDataParallel(nn.DataParallel):
-    """Custom DataParallel to access the module methods."""
-
-    def __getattr__(self, key):
-        try:
-            return super().__getattr__(key)
-        except AttributeError:
-            return getattr(self.module, key)
-
-
-def configure_optimizers(net, args):
-    """Separate parameters for the main optimizer and the auxiliary optimizer.
-    Return two optimizers"""
-    conf = {
-        "net": {"type": "Adam", "lr": args.learning_rate},
-        "aux": {"type": "Adam", "lr": args.aux_learning_rate},
-    }
-    optimizer = net_aux_optimizer(net, conf)
-    return optimizer["net"], optimizer["aux"]
+                shutil.copyfile(
+                    file_name, 
+                    f"{args.model}_checkpoint_best_loss.pth.tar"
+                )
 
 
 def train_one_epoch(
@@ -149,7 +91,7 @@ def train_one_epoch(
     model.train()
     device = next(model.parameters()).device
 
-    log_points = iter([0, 25, 50, 75, 100])
+    log_points = iter([0, 25, 50, 75, 100, 101])
     log_point = next(log_points)
     for i, d in enumerate(train_dataloader):
         d = d.to(device)
@@ -169,12 +111,12 @@ def train_one_epoch(
         aux_loss.backward()
         aux_optimizer.step()
 
-        percentage = 100. * i / len(train_dataloader)
+        percentage = round(100.0 * i / len(train_dataloader))
         if percentage >= log_point:
             logger.info(
                 f"Train epoch {epoch}: ["
                 f"{i*len(d)}/{len(train_dataloader.dataset)}"
-                f"({percentage:.0f}%)]"
+                f"({percentage}%)]"
                 f"\tLoss: {out_criterion['loss'].item():.3f} |"
                 f"\tMSE loss: {out_criterion['mse_loss'].item():.3f} |"
                 f"\tBpp loss: {out_criterion['bpp_loss'].item():.2f} |"
@@ -204,7 +146,7 @@ def test_epoch(epoch, test_dataloader, model, criterion):
             mse_loss.update(out_criterion["mse_loss"])
 
     logger.info(
-        f"\Test epoch {epoch}: Average losses:"
+        f"Test epoch {epoch}: Average losses:"
         f"\tLoss: {loss.avg:.3f} |"
         f"\tMSE loss: {mse_loss.avg:.3f} |"
         f"\tBpp loss: {bpp_loss.avg:.2f} |"
@@ -212,22 +154,6 @@ def test_epoch(epoch, test_dataloader, model, criterion):
     )
 
     return loss.avg
-
-
-class AverageMeter:
-    """Compute running average."""
-
-    def __init__(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
 
 
 if __name__ == "__main__":
