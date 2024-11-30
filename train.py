@@ -9,7 +9,7 @@ import torch
 import torch.optim as optim
 
 from loss import RateDistortionLoss
-from model import Net1
+from model import Net
 
 from utils import (
     get_logger,
@@ -34,7 +34,7 @@ def main(argv):
 
     train_dataloader, test_dataloader = prepare_data(args, device)
 
-    net = Net1()
+    net = Net()
     net = net.to(device)
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
