@@ -101,7 +101,8 @@ def train_one_epoch(
         optimizer.zero_grad()
         aux_optimizer.zero_grad()
 
-        out_net = model(d)
+        loss = 0 if random.random() < 0.8 else random.choice([i / 100 for i in range(10, 70, 10)])
+        out_net = model(d, loss)
 
         out_criterion = criterion(out_net, d)
         out_criterion["loss"].backward()

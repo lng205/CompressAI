@@ -12,7 +12,7 @@ from compressai.models.utils import (
 
 
 class Net(nn.Module):
-    def __init__(self, N=128, loss=0.2):
+    def __init__(self, N=128):
         super().__init__()
         self.entropy_bottleneck = EntropyBottleneck(N)
         self.g_a = nn.Sequential(
@@ -30,12 +30,11 @@ class Net(nn.Module):
             GDN(N, inverse=True),
             deconv(N, 3),
         )
-        self.loss = loss
 
-    def forward(self, x):
+    def forward(self, x, loss):
         y = self.g_a(x)
         y_hat, y_likelihoods = self.entropy_bottleneck(y)
-        y_rcv = self.transmission(y_hat, self.loss)
+        y_rcv = self.transmission(y_hat, loss)
         x_hat = self.g_s(y_rcv)
 
         return {
