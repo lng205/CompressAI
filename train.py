@@ -140,7 +140,8 @@ def test_epoch(epoch, test_dataloader, model, criterion):
     with torch.no_grad():
         for d in test_dataloader:
             d = d.to(device)
-            out_net = model(d)
+            pkt_loss = 0 if random.random() < 0.8 else random.choice([i / 100 for i in range(10, 70, 10)])
+            out_net = model(d, pkt_loss)
             out_criterion = criterion(out_net, d)
 
             aux_loss.update(model.aux_loss())
