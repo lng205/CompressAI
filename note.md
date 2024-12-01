@@ -1,0 +1,2 @@
+- We need a method that can split the tensor into subtensors with size even and close to MTU. 
+    - One possible approach: We compress each channel first, and pick form them. The size of the composed tensor is garunteed to be less or equal to the sum of individual channels
